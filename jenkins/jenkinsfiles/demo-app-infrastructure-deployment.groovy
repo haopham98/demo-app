@@ -51,13 +51,12 @@ pipeline {
                 script {
                     echo "--> Use AWS Credentials ID: ${env.AWS_CREDS_ID} for environment ${params.ENVIRONMENT}"
 
-                    withCredentials([
-                        usernamePassword(
-                            credentialsId: env.AWS_CREDS_ID,
-                            usernameVariable: 'AWS_ACCESS_KEY_ID',
-                            passwordVariable: 'AWS_SECRET_ACCESS_KEY'
-                        )
-                    ]) {
+                    withCredentials([[
+                        $class: 'AmazonWebServicesCredentialsBinding',
+                        credentialsId: env.AWS_CREDS_ID,
+                        accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                        secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                    ]]) {
                         dir(env.TF_DIR) {
                             sh '''
                                 echo "=== Check version of terraform ==="
@@ -77,13 +76,12 @@ pipeline {
                 script {
                     def envName = params.ENVIRONMENT.contains('prod') ? 'prod' : 'dev'
 
-                    withCredentials([
-                        usernamePassword(
-                            credentialsId: env.AWS_CREDS_ID,
-                            usernameVariable: 'AWS_ACCESS_KEY_ID',
-                            passwordVariable: 'AWS_SECRET_ACCESS_KEY'
-                        )
-                    ]) {
+                    withCredentials([[
+                        $class: 'AmazonWebServicesCredentialsBinding',
+                        credentialsId: env.AWS_CREDS_ID,
+                        accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                        secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                    ]]) {
                         dir(env.TF_DIR) {
                             echo "--> Execute Terraform Plan for environment ${params.ENVIRONMENT}..."
 
@@ -176,13 +174,12 @@ except Exception:
         stage('Terraform Apply') {
             steps {
                 script {
-                    withCredentials([
-                        usernamePassword(
-                            credentialsId: env.AWS_CREDS_ID,
-                            usernameVariable: 'AWS_ACCESS_KEY_ID',
-                            passwordVariable: 'AWS_SECRET_ACCESS_KEY'
-                        )
-                    ]) {
+                    withCredentials([[
+                        $class: 'AmazonWebServicesCredentialsBinding',
+                        credentialsId: env.AWS_CREDS_ID,
+                        accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                        secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                    ]]) {
                         dir(env.TF_DIR) {
                             echo "--> Executing Terraform Apply for ${params.ENVIRONMENT}..."
                             sh 'terraform apply -auto-approve tfplan'
@@ -214,4 +211,5 @@ except Exception:
             echo "Pipeline failed! Please check the detailed error in the console output."
         }
     }
+}
 }
