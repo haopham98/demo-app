@@ -41,7 +41,10 @@ pipeline {
                         doGenerateSubmoduleConfigurations: false,
                         extensions: [[$class: 'CleanBeforeCheckout']],
                         userRemoteConfigs: [[
-                            url: '
+                            url: 'https://github.com/haopham98/demo-app.git',
+                            credentialsId: 'haopham-lab-jenkins-code-pull'
+                        ]]
+                    ])
             }
         }
 
