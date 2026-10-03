@@ -35,16 +35,16 @@ pipeline {
                 echo "Environment: ${params.ENVIRONMENT}"
                 echo "Action:      ${params.ACTION}"
                 echo "=========================================="
-                withCredentials([usernamePassword(credentialsId: 'github-credentials-id', usernameVariable: 'GIT_USERNAME', passwordVariable: 'GIT_PASSWORD')]) {
-                    checkout([$class: 'GitSCM',
-                        branches: [[name: '*/main']],
-                        doGenerateSubmoduleConfigurations: false,
-                        extensions: [[$class: 'CleanBeforeCheckout']],
-                        userRemoteConfigs: [[
-                            url: 'https://github.com/haopham98/demo-app.git',
-                            credentialsId: 'haopham-lab-jenkins-code-pull'
-                        ]]
-                    ])
+                checkout([
+                    $class: 'GitSCM',
+                    branches: [[name: '*/main']],
+                    doGenerateSubmoduleConfigurations: false,
+                    extensions: [[$class: 'CleanBeforeCheckout']],
+                    userRemoteConfigs: [[
+                        url: 'https://github.com/haopham98/demo-app.git',
+                        credentialsId: 'haopham-lab-jenkins-code-pull'
+                    ]]
+                ])
             }
         }
 
