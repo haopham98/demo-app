@@ -1,6 +1,5 @@
 pipeline {
     agent any
-
     options {
         // Prevent concurrent builds of the same job to avoid conflicts in Terraform state
         disableConcurrentBuilds()
@@ -23,6 +22,7 @@ pipeline {
     environment {
         TF_DIR             = "${params.ENVIRONMENT}"
         AWS_DEFAULT_REGION = 'ap-southeast-1'
+        AWS_CREDS_ID       = 'aws-cred-dev-lab'
     }
 
     stages {
@@ -49,17 +49,14 @@ pipeline {
         stage('Terraform Init') {
             steps {
                 script {
-                    // Select AWS credentials based on the environment
-                    def awsCredsId = (params.ENVIRONMENT.contains('prod')) ? 'aws-prod-credentials-id' : 'aws-dev-credentials-id'
-                    echo "--> Use AWS Credentials ID: ${awsCredsId} for environment ${params.ENVIRONMENT}"
+                    echo "--> Use AWS Credentials ID: ${env.AWS_CREDS_ID} for environment ${params.ENVIRONMENT}"
 
-                    withCredentials([
-                        usernamePassword(
-                            credentialsId: awsCredsId,
-                            usernameVariable: 'AWS_ACCESS_KEY_ID',
-                            passwordVariable: 'AWS_SECRET_ACCESS_KEY'
-                        )
-                    ]) {
+                    withCredentials([[
+                        $class: 'AmazonWebServicesCredentialsBinding',
+                        credentialsId: env.AWS_CREDS_ID,
+                        accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                        secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                    ]]) {
                         dir(env.TF_DIR) {
                             sh '''
                                 echo "=== Check version of terraform ==="
@@ -77,16 +74,14 @@ pipeline {
         stage('Terraform Plan') {
             steps {
                 script {
-                    def awsCredsId = (params.ENVIRONMENT.contains('prod')) ? 'aws-prod-credentials-id' : 'aws-dev-credentials-id'
                     def envName = params.ENVIRONMENT.contains('prod') ? 'prod' : 'dev'
 
-                    withCredentials([
-                        usernamePassword(
-                            credentialsId: awsCredsId,
-                            usernameVariable: 'AWS_ACCESS_KEY_ID',
-                            passwordVariable: 'AWS_SECRET_ACCESS_KEY'
-                        )
-                    ]) {
+                    withCredentials([[
+                        $class: 'AmazonWebServicesCredentialsBinding',
+                        credentialsId: env.AWS_CREDS_ID,
+                        accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                        secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                    ]]) {
                         dir(env.TF_DIR) {
                             echo "--> Execute Terraform Plan for environment ${params.ENVIRONMENT}..."
 
@@ -179,15 +174,12 @@ except Exception:
         stage('Terraform Apply') {
             steps {
                 script {
-                    def awsCredsId = (params.ENVIRONMENT.contains('prod')) ? 'aws-prod-credentials-id' : 'aws-dev-credentials-id'
-
-                    withCredentials([
-                        usernamePassword(
-                            credentialsId: awsCredsId,
-                            usernameVariable: 'AWS_ACCESS_KEY_ID',
-                            passwordVariable: 'AWS_SECRET_ACCESS_KEY'
-                        )
-                    ]) {
+                    withCredentials([[
+                        $class: 'AmazonWebServicesCredentialsBinding',
+                        credentialsId: env.AWS_CREDS_ID,
+                        accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                        secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                    ]]) {
                         dir(env.TF_DIR) {
                             echo "--> Executing Terraform Apply for ${params.ENVIRONMENT}..."
                             sh 'terraform apply -auto-approve tfplan'
