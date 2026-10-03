@@ -1,11 +1,13 @@
+def dbPassword = ''
+def envName = ''
+def awsCredsId = ''
+
 pipeline {
     agent any
 
     options {
         // Prevent concurrent builds of the same job to avoid conflicts in Terraform state
         disableConcurrentBuilds()
-        timestamps()
-        ansiColor('xterm')
         timeout(time: 2, unit: 'HOURS')
     }
 
@@ -23,7 +25,7 @@ pipeline {
     }
 
     environment {
-        TF_DIR             = '${params.ENVIRONMENT}'
+        TF_DIR             = "${params.ENVIRONMENT}"
         AWS_DEFAULT_REGION = 'ap-southeast-1'
     }
 
@@ -48,11 +50,68 @@ pipeline {
             }
         }
 
+        stage('Fetch Database Password') {
+            steps {
+                script {
+                    envName = (params.ENVIRONMENT.contains('prod')) ? 'prod' : 'dev'
+                    awsCredsId = (envName == 'prod') ? 'aws-prod-credentials-id' : 'aws-dev-credentials-id'
+
+                    echo "=========================================="
+                    echo "2. Fetch Database Password from AWS SSM"
+                    echo "Environment : ${envName}"
+                    echo "SSM Path    : /demo/${envName}/variables"
+                    echo "Credentials : ${awsCredsId}"
+                    echo "=========================================="
+
+                    withCredentials([
+                        usernamePassword(
+                            credentialsId: awsCredsId,
+                            usernameVariable: 'AWS_ACCESS_KEY_ID',
+                            passwordVariable: 'AWS_SECRET_ACCESS_KEY'
+                        )
+                    ]) {
+                        dbPassword = sh(
+                            script: """
+                                set +x
+                                PARAM_NAME="/demo/${envName}/variables"
+                                RAW_VAL=\$(aws ssm get-parameter --name "\$PARAM_NAME" --with-decryption --query "Parameter.Value" --output text 2>/dev/null || aws ssm get-parameter --name "/demo/dev/variables" --with-decryption --query "Parameter.Value" --output text 2>/dev/null || true)
+                                
+                                if [ -z "\$RAW_VAL" ]; then
+                                    echo "ERROR: Unable to retrieve SSM parameter \$PARAM_NAME or /demo/dev/variables" >&2
+                                    exit 1
+                                fi
+
+                                python3 -c "
+import json, sys
+raw = sys.stdin.read().strip()
+try:
+    data = json.loads(raw)
+    if isinstance(data, dict):
+        val = data.get('RDS_DB_PASSWD')
+        if not val:
+            raise ValueError('Key RDS_DB_PASSWD not found in JSON')
+        print(val)
+    else:
+        print(raw)
+except Exception:
+    print(raw)
+" <<< "\$RAW_VAL"
+                            """,
+                            returnStdout: true
+                        ).trim()
+
+                        if (!dbPassword) {
+                            error("Failed to retrieve RDS_DB_PASSWD from AWS SSM (/demo/${envName}/variables)")
+                        }
+                        echo "--> Successfully retrieved RDS_DB_PASSWD from AWS SSM Parameter Store."
+                    }
+                }
+            }
+        }
+
         stage('Terraform Init') {
             steps {
                 script {
-                    // Select AWS credentials based on the environment
-                    def awsCredsId = (params.ENVIRONMENT == 'prod') ? 'aws-prod-credentials-id' : 'aws-dev-credentials-id'
                     echo "--> Use AWS Credentials ID: ${awsCredsId} for environment ${params.ENVIRONMENT}"
 
                     withCredentials([
@@ -79,8 +138,6 @@ pipeline {
         stage('Terraform Plan') {
             steps {
                 script {
-                    def awsCredsId = (params.ENVIRONMENT == 'prod') ? 'aws-prod-credentials-id' : 'aws-dev-credentials-id'
-
                     withCredentials([
                         usernamePassword(
                             credentialsId: awsCredsId,
@@ -88,14 +145,24 @@ pipeline {
                             passwordVariable: 'AWS_SECRET_ACCESS_KEY'
                         )
                     ]) {
-                        dir(env.TF_DIR) {
-                            echo "--> Execute Terraform Plan for environment ${params.ENVIRONMENT}..."
+                        withEnv([
+                            "TF_VAR_db_password=${dbPassword}",
+                            "TF_var_db_password=${dbPassword}"
+                        ]) {
+                            dir(env.TF_DIR) {
+                                echo "--> Execute Terraform Plan for environment ${params.ENVIRONMENT}..."
 
-                            // Create plan file (support both apply and destroy)
-                            if (params.ACTION == 'destroy') {
-                                sh "terraform plan -destroy -var='environment=${params.ENVIRONMENT}' -out=tfplan"
-                            } else {
-                                sh "terraform plan -var='environment=${params.ENVIRONMENT}' -out=tfplan"
+                                if (params.ACTION == 'destroy') {
+                                    sh """
+                                        set +x
+                                        terraform plan -destroy -var="environment=${envName}" -var="db_password=\${TF_VAR_db_password}" -out=tfplan
+                                    """
+                                } else {
+                                    sh """
+                                        set +x
+                                        terraform plan -var="environment=${envName}" -var="db_password=\${TF_VAR_db_password}" -out=tfplan
+                                    """
+                                }
                             }
                         }
                     }
@@ -106,7 +173,7 @@ pipeline {
         stage('Manual Approval') {
             when {
                 // For Prod deployments, require manual approval before proceeding to apply
-                expression { params.ENVIRONMENT == 'prod' }
+                expression { params.ENVIRONMENT.contains('prod') && params.ACTION != 'plan' }
             }
             steps {
                 timeout(time: 60, unit: 'MINUTES') {
@@ -138,10 +205,11 @@ pipeline {
         }
 
         stage('Terraform Apply') {
+            when {
+                expression { params.ACTION != 'plan' }
+            }
             steps {
                 script {
-                    def awsCredsId = (params.ENVIRONMENT == 'prod') ? 'aws-prod-credentials-id' : 'aws-dev-credentials-id'
-
                     withCredentials([
                         usernamePassword(
                             credentialsId: awsCredsId,
@@ -149,13 +217,18 @@ pipeline {
                             passwordVariable: 'AWS_SECRET_ACCESS_KEY'
                         )
                     ]) {
-                        dir(env.TF_DIR) {
-                            echo "--> Executing Terraform Apply for ${params.ENVIRONMENT}..."
-                            sh 'terraform apply -auto-approve tfplan'
+                        withEnv([
+                            "TF_VAR_db_password=${dbPassword}",
+                            "TF_var_db_password=${dbPassword}"
+                        ]) {
+                            dir(env.TF_DIR) {
+                                echo "--> Executing Terraform Apply for ${params.ENVIRONMENT}..."
+                                sh 'terraform apply -auto-approve tfplan'
 
-                            if (params.ACTION != 'destroy') {
-                                echo "=== Outputs after deployment ==="
-                                sh 'terraform output'
+                                if (params.ACTION != 'destroy') {
+                                    echo "=== Outputs after deployment ==="
+                                    sh 'terraform output'
+                                }
                             }
                         }
                     }

@@ -1,7 +1,8 @@
 # Example configuration variables for Terraform
 aws_region  = "ap-southeast-1"
 environment = "dev"
-db_password = "ChangeThisStrongPassword123!"
+# db_password is provided securely via AWS SSM (/demo/dev/variables) or TF_VAR_db_password
+# db_password = "ChangeThisStrongPassword123!"
 
 # CIDR customization (optional)
 vpc_cidr              = "10.0.0.0/16"
